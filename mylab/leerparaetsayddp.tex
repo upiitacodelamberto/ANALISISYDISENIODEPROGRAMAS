@@ -1,0 +1,252 @@
+\documentclass{article}
+\begin{document}
+\noindent{\bf\Large An\'alisis y Dise\~no de Programas}\\
+Examen: En esta prueba de examinaci\'on se pide analizar ciertos fragmentos 
+de c\'odigo en lenguaje C para poder responder los ejercicios se\~nalados 
+a trav\'es de este documento. El c\'odigo fuente que se pide analizar 
+corresponde a un kernel de sistema operativo conocido como JOS.\\
+\noindent La estructura {\tt struct Elf} est\'a declarada en {\tt inc/elf.h} 
+como 
+\begin{verbatim}
+#define ELF_MAGIC 0x464C457FU	/* "\x7FELF" in little endian */
+
+struct Elf {
+  uint32_t e_magic;	// must equal ELF_MAGIC
+  uint8_t e_elf[12];
+  uint16_t e_type;
+  uint16_t e_machine;
+  uint32_t e_version;
+  uint32_t e_entry;
+  uint32_t e_phoff;
+  uint32_t e_shoff;
+  uint32_t e_flags;
+  uint16_t e_ehsize;
+  uint16_t e_phentsize;
+  uint16_t e_phnum;
+  uint16_t e_shentsize;
+  uint16_t e_shnum;
+  uint16_t e_shstrndx;
+};
+\end{verbatim}
+En el archivo {\tt boot/main.c} podemos ver la funci\'on {\tt bootmain()}
+\begin{verbatim}
+#define SECTSIZE	512
+#define ELFHDR		((struct Elf *) 0x10000) // scratch space
+
+void readsect(void*, uint32_t);
+void readseg(uint32_t, uint32_t, uint32_t);
+
+struct multiboot_info *mbi;
+
+void
+bootmain(void)
+{
+  struct Proghdr *ph, *eph;
+
+  // read 1st page off disk
+  readseg((uint32_t) ELFHDR, SECTSIZE*8, 0);
+
+  // is this a valid ELF?
+  if (ELFHDR->e_magic != ELF_MAGIC)
+    goto bad;
+  
+  // load each program segment (ignores ph flags)
+  ph = (struct Proghdr *) ((uint8_t *) ELFHDR + ELFHDR->e_phoff);
+  eph = ph + ELFHDR->e_phnum;
+  for (; ph < eph; ph++)
+    // p_pa is the load address of this segment (as well
+    // as the physical address)
+    readseg(ph->p_pa, ph->p_memsz, ph->p_offset);
+  
+  // set up multiboot: fill struct multiboot_info
+  // boot.S sets mbi to the end of mmap entries
+  mbi->flags = MULTIBOOT_INFO_MEM_MAP;
+  mbi->mmap_length = (uint32_t)mbi & (4096 - 1); // 4K aligned
+  mbi->mmap_addr = (uint32_t)mbi - mbi->mmap_length;
+  
+  // 3.2 Machine state:
+  // * eax: contain MULTIBOOT_BOOTLOADER_MAGIC
+  // * ebx: contain the 32-bit physical address
+  asm ("movl %0, %%eax;"
+       "movl %1, %%ebx;"
+       : : "r"(MULTIBOOT_BOOTLOADER_MAGIC), "r"(mbi)
+       : "eax", "ebx");
+  
+  // call the entry point from the ELF header
+  // note: does not return!
+  ((void (*)(void)) (ELFHDR->e_entry))();
+  
+bad:
+  outw(0x8A00, 0x8A00);
+  outw(0x8A00, 0x8E00);
+  while (1)
+    /* do nothing */;
+}
+\end{verbatim}
+En esta vemos que el primer llamado a funci\'on es a 
+\begin{center}
+{\tt readseg(uint32$\_$t pa, uint32$\_$t count, uint32$\_$t offset)}
+\end{center}
+cuyo c\'odigo se incluye aqu\'i
+\begin{verbatim}
+// Read 'count' bytes at 'offset' from kernel into physical address 'pa'.
+// Might copy more than asked
+void
+readseg(uint32_t pa, uint32_t count, uint32_t offset)
+{
+  uint32_t end_pa;
+
+  end_pa = pa + count;
+
+  // round down to sector boundary
+  pa &= ~(SECTSIZE - 1);
+
+  // translate from bytes to sectors, and kernel starts at sector 1
+  offset = (offset / SECTSIZE) + 1;
+
+  // If this is too slow, we could read lots of sectors at a time.
+  // We'd write more to memory than asked, but it doesn't matter --
+  // we load in increasing order.
+  while (pa < end_pa) {
+    // Since we haven't enabled paging yet and we're using
+    // an identity segment mapping (see boot.S), we can
+    // use physical addresses directly.  This won't be the
+    // case once JOS enables the MMU.
+    readsect((uint8_t*) pa, offset);
+    pa += SECTSIZE;
+    offset++;
+  }
+}
+\end{verbatim}
+\noindent{\bf Ejercicio 1}\\
+En el llamado a esta funci\'on, determine el valor num\'erico de la variable 
+{\tt end$\_$pa} despu\'es de la ejecuci\'on de la sentencia 
+\begin{center}
+{\tt end$\_$pa = pa + count;}
+\end{center}
+Realice e incluya expl\'icitamente los c\'alculos para llegar a su respuesta.
+
+\noindent{\bf Ejercicio 2}\\
+En el llamado a esta funci\'on, determine el valor num\'erico de la variable 
+{\tt pa} despu\'es de la ejecuci\'on de la sentencia
+\begin{center}
+\begin{verbatim}
+pa &= ~(SECTSIZE - 1);
+\end{verbatim}
+\end{center}
+Realice e incluya expl\'icitamente los c\'alculos para llegar a su respuesta.
+
+\noindent{\bf Ejercicio 3}\\
+En el llamado a esta funci\'on, determine el valor num\'erico de la variable 
+{\tt offset} despu\'es de la ejecuci\'on de la sentencia
+\begin{center}
+{\tt offset = (offset / SECTSIZE) + 1;}
+\end{center}
+Realice e incluya expl\'icitamente los c\'alculos para llegar a su respuesta.
+
+\noindent{\bf Ejercicio 4}\\
+Determine cu\'antas veces se ejecutar\'a el 
+ciclo {\tt while} en este llamado a la funci\'on 
+\begin{center}
+{\tt readseg(uint32$\_$t pa, uint32$\_$t count, uint32$\_$t offset)}
+\end{center}
+Realice e incluya expl\'icitamente los c\'alculos para llegar a su respuesta.
+
+\ \\
+En el archivo {\tt inc/elf.h} est\'a la declaraci\'on de {\tt struct Proghdr}.
+\begin{verbatim}
+struct Proghdr {
+  uint32_t p_type;
+  uint32_t p_offset;
+  uint32_t p_va;
+  uint32_t p_pa;
+  uint32_t p_filesz;
+  uint32_t p_memsz;
+  uint32_t p_flags;
+  uint32_t p_align;
+};
+\end{verbatim}
+
+De regreso a boot/main.c el campo {\tt ph->p$\_$pa} de cada header del 
+programa contiene la direcci\'on f\/\'isica de destino del segmento (en 
+este caso es realmente una direcci\'on f\/\'isica, aunque la especif\/icaci\'on  
+ELF es vaga respecto al signif\/icado real de este campo).
+
+El BIOS carga el sector boot en memoria comenzando en la direcci\'on 0x7c00, 
+as\'i esta es la direcci\'on de carga del sector boot (LMA). Esta tambi\'en es 
+la direcci\'on desde donde se ejecuta el sector boot, as\'i que es tambi\'en la 
+direcci\'on de enlazado (VMA). Establecemos la direcci\'on de enlazado pasando el 
+par\'ametro -Ttext 0x7c00 al enlazador en boot/Makefrag, as\'i que el linker 
+producir\'a la direcci\'on de memoria correcta en el c\'odigo generado.
+
+Por ahora, solo se mapear\'an los primeros 4MB de memoria f\'isica, lo cual ser\'a 
+suf\/iciente para ponernos arriba y corriendo. hacemos esto usando el directorio de 
+p\'agina y tabla de p\'agina est\'aticamente inicializados, escritos a mano en 
+{\tt kern/entrypgdir.c}. 
+Por ahora no es necesario entender los detalles de como trabaja, solo el efecto que 
+consigue. (Se incluye aqu\'i el archivo {\tt kern/entrypgdir.c})
+\begin{verbatim}
+#include <inc/mmu.h>
+#include <inc/memlayout.h>
+
+pte_t entry_pgtable[NPTENTRIES];
+\end{verbatim}
+\eject
+\begin{verbatim}
+// The entry.S page directory maps the first 4MB of physical memory
+// starting at virtual address KERNBASE (that is, it maps virtual
+// addresses [KERNBASE, KERNBASE+4MB) to physical addresses [0, 4MB)).
+// We choose 4MB because that's how much we can map with one page
+// table and it's enough to get us through early boot.  We also map
+// virtual addresses [0, 4MB) to physical addresses [0, 4MB); this
+// region is critical for a few instructions in entry.S and then we
+// never use it again.
+//
+// Page directories/tables must start on a page boundary, hence the
+// "aligned" attribute.
+__attribute__((aligned(PGSIZE)))
+pde_t entry_pgdir[NPDENTRIES] = {
+  // Map VA's [0, 4MB) to PA's [0, 4MB)
+  [0]
+      = 0x000000 | PTE_P | PTE_PS,
+  // Map VA's [KERNBASE, KERNBASE+4MB) to PA's [0, 4MB)
+  [KERNBASE>>PDXSHIFT]
+      = 0x000000 | PTE_P | PTE_W | PTE_PS
+};
+\end{verbatim}
+\begin{itemize}
+\item Hasta ahora {\tt kern/entry.S} establece la bandera {\tt CR0$\_$PG}, 
+las referencias de memoria son tratadas como direcciones f\'isicas 
+(estrictamente hablando, son direcciones lineales, pero en {\tt boot/boot.S} 
+se establece un mapeo identidad de las direcciones lineales a las direcciones 
+f\'isicas y en este kernel nunca cambiaremos eso).
+\item Una vez que {\tt CR0$\_$PG} es establecido las referencias a memoria 
+son direcciones virtuales que se traducen por medio del hardware de memoria 
+virtual a direcciones f\'isicas. {\tt entry$\_$pgdir} traduce direcciones 
+virtuales en el rango de {\tt 0xf0000000} a {\tt 0xf0400000} a direcciones 
+f\'isicas en el rango de {\tt 0x00000000} a {\tt 0x00400000}, as\'i como 
+direcciones virtuales en el rango de {\tt 0x00000000} a {\tt 0x00400000} a 
+direcciones f\'isicas en el rango de {\tt 0x00000000} a {\tt 0x00400000}. 
+Cualquier direcci\'on virtual que no est\'e en uno de esos dos rangos 
+causar\'a una excepci\'on de hardware la cual, dado que aun no se ha 
+establecido el manejo de interrupciones, causar\'a que la computadora se 
+reinicie una y otra vez indefinidamente.
+\end{itemize}
+\noindent{\bf Impresi\'on con formato a la consola}\\
+La mayor\'ia de la gente toma funciones como {\tt printf()} como algo cuya 
+existencia est\'a garantizada, algunas veces incluso piensan que funciones 
+como esta son ``primitivas'' del lenguaje C. Pero en un kernel de sistema 
+operativo, debemos implementar toda la I/O nosotros mismos.
+
+Lea a trav\'es de los archivos {\tt kern/printf.c}, {\tt lib/printfmt.c}, y 
+{\tt kern/console.c}, y asegurese de entender c\'omo se relacionan. 
+
+\noindent{\bf Ejercicio 5}\\
+Se ha omitido un peque\~no fragmento de c\'odigo --- el c\'odigo necesario 
+para imprimir n\'umeros octales usando patrones de la forma {\tt "\%o"}. 
+Encuentre d\'onde falta ese fragmento de c\'odigo y escriba el c\'odigo 
+necesario para que un n\'umero se imprima en octal.
+
+Al ejecutar {\tt make grade} el c\'odigo debe pasar la prueba {\tt printf}.
+
+\end{document}
